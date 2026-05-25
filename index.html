@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -85,7 +84,7 @@
 
     <div class="form-group">
         <label for="taxCode">Tax Code</label>
-        <input type="text" id="taxCode" placeholder="e.g. 1131L" style="text-transform: uppercase;">
+        <input type="text" id="taxCode" placeholder="e.g. 1131L, 1257T, 1383M" style="text-transform: uppercase;">
     </div>
 
     <div class="form-group">
@@ -124,23 +123,18 @@
         if (isNaN(date.getTime())) return null;
 
         const year = date.getFullYear();
-        // April 6th of the current paying year
-        let taxYearStart = new Date(year, 3, 6); // Month is 0-indexed, 3 = April
+        let taxYearStart = new Date(year, 3, 6); // 3 = April
         
-        // If the date is before April 6th, it belongs to the previous tax year's calendar cycle
         if (date < taxYearStart) {
             taxYearStart = new Date(year - 1, 3, 6);
         }
 
-        // Calculate whole months elapsed since April 6th
         let months = (date.getFullYear() - taxYearStart.getFullYear()) * 12 + (date.getMonth() - taxYearStart.getMonth());
         
-        // Adjust if day of month is earlier than the 6th
         if (date.getDate() < taxYearStart.getDate()) {
             months--;
         }
 
-        // Tax month is 1-indexed (Month 1 = Apr 6 - May 5)
         const taxMonth = months + 1;
         return (taxMonth >= 1 && taxMonth <= 12) ? taxMonth : null;
     }
@@ -162,10 +156,10 @@
             return;
         }
 
-        // Extract annual personal allowance from standard 'L' code
-        const codeMatch = taxCodeStr.match(/^(\d+)[L]$/);
+        // UPDATED: Matches digits followed by L, T, or M suffixes safely
+        const codeMatch = taxCodeStr.match(/^(\d+)[LTM]$/);
         if (!codeMatch) {
-            alert("This basic tool currently only supports standard cumulative 'L' tax codes (e.g., 1131L).");
+            alert("This tool supports standard cumulative L, T, and M tax codes (e.g., 1131L, 1257T, 1383M).");
             return;
         }
         const annualAllowance = parseFloat(codeMatch[1]) * 10;
@@ -177,24 +171,22 @@
         let rawTaxableIncome = payToDate - cumulativeAllowance;
         if (rawTaxableIncome < 0) rawTaxableIncome = 0;
 
-        // HMRC Rounding Rule: Drop the pence entirely on taxable income before tax band lookup
+        // HMRC Rounding Rule: Drop the pence entirely on taxable income
         const hmrcRoundedTaxableIncome = Math.floor(rawTaxableIncome);
 
-        // Basic Rate Band 2026/27 pro-rated check (Basic rate limit £37,700)
+        // Basic Rate Band 2026/27 pro-rated check (£37,700 basic limit)
         const basicRateLimitYTD = (37700 / 12) * taxMonth;
         let taxDueYTD = 0;
 
         if (hmrcRoundedTaxableIncome <= basicRateLimitYTD) {
             taxDueYTD = hmrcRoundedTaxableIncome * 0.20;
         } else {
-            // Basic rate portion
             taxDueYTD = basicRateLimitYTD * 0.20;
-            // Higher rate portion (40%) up to current YTD scope
             const higherRateTaxable = hmrcRoundedTaxableIncome - basicRateLimitYTD;
             taxDueYTD += (higherRateTaxable * 0.40); 
         }
 
-        // Final HMRC Rounding down on tax due to the nearest whole pound
+        // Final HMRC Rounding down to nearest whole pound
         const finalTaxDue = Math.floor(taxDueYTD);
 
         // Display results
