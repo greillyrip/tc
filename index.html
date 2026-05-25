@@ -110,14 +110,17 @@
 </div>
 
 <script>
+    // Safe URL param parsing on load
     window.addEventListener('DOMContentLoaded', () => {
         const params = new URLSearchParams(window.location.search);
+        
         if (params.has('payToDate')) document.getElementById('payToDate').value = params.get('payToDate');
         if (params.has('taxCode')) document.getElementById('taxCode').value = params.get('taxCode').toUpperCase();
         if (params.has('payDate')) document.getElementById('payDate').value = params.get('payDate');
         
         if (params.has('payToDate') && params.has('taxCode') && params.has('payDate')) {
-            calculateTax();
+            // Added small timeout to guarantee DOM is fully populated before executing math
+            setTimeout(calculateTax, 50);
         }
     });
 
@@ -154,7 +157,6 @@
         let isKCode = false;
         let annualValue = 0;
 
-        // Check if it's a K code (Starts with K followed by digits) or standard (Digits followed by L/T/M)
         if (taxCodeStr.startsWith('K')) {
             const kMatch = taxCodeStr.match(/^K(\d+)$/);
             if (!kMatch) {
@@ -172,26 +174,54 @@
             annualValue = parseFloat(standardMatch[1]) * 10;
         }
 
-        // Pro-rate the numerical value for the cumulative month
         const proRatedAdjustment = (annualValue / 12) * taxMonth;
         let rawTaxableIncome = 0;
 
+        // Elements to update labels dynamically
+        const lblAdjustment = document.getElementById('lblAdjustment');
+        const resAllowance = document.getElementById('resAllowance');
+
         if (isKCode) {
-            // K Code adds notional extra income to actual earnings
             rawTaxableIncome = payToDate + proRatedAdjustment;
-            document.getElementById('lblAdjustment').textContent = "Pro-rated Additional Income:";
-            document.getElementById('resAllowance').textContent = `+£${proRatedAdjustment.toFixed(2)}`;
+            if (lblAdjustment) lblAdjustment.textContent = "Pro-rated Additional Income:";
+            if (resAllowance) resAllowance.textContent = `+£${proRatedAdjustment.toFixed(2)}`;
         } else {
-            // Standard codes deduct the allowance
             rawTaxableIncome = payToDate - proRatedAdjustment;
             if (rawTaxableIncome < 0) rawTaxableIncome = 0;
-            document.getElementById('lblAdjustment').textContent = "Pro-rated Tax-free Allowance:";
-            document.getElementById('resAllowance').textContent = `-£${proRatedAdjustment.toFixed(2)}`;
+            if (lblAdjustment) lblAdjustment.textContent = "Pro-rated Tax-free Allowance:";
+            if (resAllowance) resAllowance.textContent = `-£${proRatedAdjustment.toFixed(2)}`;
         }
 
-        // HMRC Rounding Rule: Drop the pence entirely on taxable income
         const hmrcRoundedTaxableIncome = Math.floor(rawTaxableIncome);
-
-        // Basic Rate Band 2026/27 pro-rated check (£37,700 basic limit)
         const basicRateLimitYTD = (37700 / 12) * taxMonth;
-        let taxDueYTD =
+        let taxDueYTD = 0;
+
+        if (hmrcRoundedTaxableIncome <= basicRateLimitYTD) {
+            taxDueYTD = hmrcRoundedTaxableIncome * 0.20;
+        } else {
+            taxDueYTD = basicRateLimitYTD * 0.20;
+            const higherRateTaxable = hmrcRoundedTaxableIncome - basicRateLimitYTD;
+            taxDueYTD += (higherRateTaxable * 0.40); 
+        }
+
+        let finalTaxDue = Math.floor(taxDueYTD);
+
+        // Max 50% Regulatory Safeguard override Check
+        const maxAllowedTaxYTD = payToDate * 0.50;
+        let isCapped = false;
+        if (finalTaxDue > maxAllowedTaxYTD) {
+            finalTaxDue = Math.floor(maxAllowedTaxYTD);
+            isCapped = true;
+        }
+
+        // Display results safely
+        document.getElementById('resMonth').textContent = `Month ${taxMonth}`;
+        document.getElementById('resTaxable').textContent = `£${hmrcRoundedTaxableIncome.toFixed(2)}`;
+        document.getElementById('resTax').textContent = `£${finalTaxDue.toFixed(2)}`;
+        document.getElementById('capAlert').style.display = isCapped ? 'block' : 'none';
+        document.getElementById('result').style.display = 'block';
+    }
+</script>
+
+</body>
+</html>
