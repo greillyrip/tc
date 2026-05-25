@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UK PAYE Cumulative Tax Calculator</title>
+    <title>UK PAYE Tax Calculator</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -23,6 +23,23 @@
         h1 { margin-top: 0; font-size: 1.5rem; color: #111827; }
         .form-group {
             margin-bottom: 1.25rem;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1.25rem;
+            user-select: none;
+        }
+        .checkbox-group input {
+            width: auto;
+            margin-right: 0.5rem;
+            transform: scale(1.2);
+            cursor: pointer;
+        }
+        .checkbox-group label {
+            display: inline;
+            margin-bottom: 0;
+            cursor: pointer;
         }
         label {
             display: block;
@@ -76,15 +93,23 @@
             font-size: 0.85rem;
             margin-top: 0.25rem;
         }
+        .info-badge {
+            background-color: #e0f2fe;
+            color: #0369a1;
+            font-size: 0.8rem;
+            font-weight: bold;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>UK PAYE Cumulative Tax Calculator (2026/27)</h1>
+    <h1>UK PAYE Tax Calculator (2026/27)</h1>
     
     <div class="form-group">
-        <label for="payToDate">Taxable Pay to Date (£)</label>
+        <label for="payToDate">Pay for Period / To Date (£)</label>
         <input type="number" id="payToDate" step="0.01" placeholder="e.g. 6220">
     </div>
 
@@ -93,24 +118,29 @@
         <input type="text" id="taxCode" placeholder="e.g. 1131L, K400, 1257T" style="text-transform: uppercase;">
     </div>
 
+    <div class="checkbox-group">
+        <input type="checkbox" id="w1m1">
+        <label for="w1m1">This is a <strong>W1 / M1</strong> non-cumulative code</label>
+    </div>
+
     <div class="form-group">
         <label for="payDate">Pay Date</label>
         <input type="date" id="payDate">
     </div>
 
-    <button onclick="calculateTax()">Calculate Tax Due to Date</button>
+    <button onclick="calculateTax()">Calculate Income Tax</button>
 
     <div id="result" class="result-box" style="display: none;">
+        <div class="result-row"><span>Calculation Basis:</span> <span id="resBasis" class="info-badge">Cumulative</span></div>
         <div class="result-row"><span>Tax Year Month:</span> <span id="resMonth">-</span></div>
         <div class="result-row"><span id="lblAdjustment">Pro-rated Allowance:</span> <span id="resAllowance">-</span></div>
         <div class="result-row"><span>Taxable Income (HMRC Rounded):</span> <span id="resTaxable">-</span></div>
-        <div class="total-row result-row"><span>Tax Due to Date:</span> <span id="resTax">-</span></div>
-        <div id="capAlert" class="alert-text" style="display: none;">* Regulatory Warning: Tax due was capped at 50% of the YTD Taxable Pay.</div>
+        <div class="total-row result-row"><span id="lblTaxTotal">Tax Due to Date:</span> <span id="resTax">-</span></div>
+        <div id="capAlert" class="alert-text" style="display: none;">* Regulatory Warning: Tax due was capped at 50% of the period's taxable pay.</div>
     </div>
 </div>
 
 <script>
-    // Safe URL param parsing on load
     window.addEventListener('DOMContentLoaded', () => {
         const params = new URLSearchParams(window.location.search);
         
@@ -118,8 +148,13 @@
         if (params.has('taxCode')) document.getElementById('taxCode').value = params.get('taxCode').toUpperCase();
         if (params.has('payDate')) document.getElementById('payDate').value = params.get('payDate');
         
+        // Handle incoming checkbox state from URL if provided (e.g., &w1m1=true or &w1m1=1)
+        if (params.has('w1m1')) {
+            const w1m1Val = params.get('w1m1').toLowerCase();
+            document.getElementById('w1m1').checked = (w1m1Val === 'true' || w1m1Val === '1');
+        }
+        
         if (params.has('payToDate') && params.has('taxCode') && params.has('payDate')) {
-            // Added small timeout to guarantee DOM is fully populated before executing math
             setTimeout(calculateTax, 50);
         }
     });
@@ -140,19 +175,23 @@
 
     function calculateTax() {
         const payToDate = parseFloat(document.getElementById('payToDate').value);
-        const taxCodeStr = document.getElementById('taxCode').value.trim().toUpperCase();
+        const taxCodeStr = document.getElementById('taxCode').value.trim().toUpperCase().replace(/\s+/g, '');
         const payDateStr = document.getElementById('payDate').value;
+        const isNonCumulative = document.getElementById('w1m1').checked;
 
         if (isNaN(payToDate) || !taxCodeStr || !payDateStr) {
             alert("Please fill in all fields correctly.");
             return;
         }
 
-        const taxMonth = getTaxMonth(payDateStr);
-        if (!taxMonth) {
+        const trueTaxMonth = getTaxMonth(payDateStr);
+        if (!trueTaxMonth) {
             alert("Invalid date selection.");
             return;
         }
+
+        // Calculation rules enforce Month 1 metrics if checkbox state is active
+        const calculationMonth = isNonCumulative ? 1 : trueTaxMonth;
 
         let isKCode = false;
         let annualValue = 0;
@@ -174,50 +213,54 @@
             annualValue = parseFloat(standardMatch[1]) * 10;
         }
 
-        const proRatedAdjustment = (annualValue / 12) * taxMonth;
+        const proRatedAdjustment = (annualValue / 12) * calculationMonth;
         let rawTaxableIncome = 0;
 
-        // Elements to update labels dynamically
         const lblAdjustment = document.getElementById('lblAdjustment');
         const resAllowance = document.getElementById('resAllowance');
 
         if (isKCode) {
             rawTaxableIncome = payToDate + proRatedAdjustment;
-            if (lblAdjustment) lblAdjustment.textContent = "Pro-rated Additional Income:";
+            if (lblAdjustment) lblAdjustment.textContent = isNonCumulative ? "Month 1 Additional Income:" : "Pro-rated Additional Income:";
             if (resAllowance) resAllowance.textContent = `+£${proRatedAdjustment.toFixed(2)}`;
         } else {
             rawTaxableIncome = payToDate - proRatedAdjustment;
             if (rawTaxableIncome < 0) rawTaxableIncome = 0;
-            if (lblAdjustment) lblAdjustment.textContent = "Pro-rated Tax-free Allowance:";
+            if (lblAdjustment) lblAdjustment.textContent = isNonCumulative ? "Month 1 Tax-free Allowance:" : "Pro-rated Tax-free Allowance:";
             if (resAllowance) resAllowance.textContent = `-£${proRatedAdjustment.toFixed(2)}`;
         }
 
         const hmrcRoundedTaxableIncome = Math.floor(rawTaxableIncome);
-        const basicRateLimitYTD = (37700 / 12) * taxMonth;
-        let taxDueYTD = 0;
+        const basicRateLimitYTD = (37700 / 12) * calculationMonth;
+        let taxDue = 0;
 
         if (hmrcRoundedTaxableIncome <= basicRateLimitYTD) {
-            taxDueYTD = hmrcRoundedTaxableIncome * 0.20;
+            taxDue = hmrcRoundedTaxableIncome * 0.20;
         } else {
-            taxDueYTD = basicRateLimitYTD * 0.20;
+            taxDue = basicRateLimitYTD * 0.20;
             const higherRateTaxable = hmrcRoundedTaxableIncome - basicRateLimitYTD;
-            taxDueYTD += (higherRateTaxable * 0.40); 
+            taxDue += (higherRateTaxable * 0.40); 
         }
 
-        let finalTaxDue = Math.floor(taxDueYTD);
+        let finalTaxDue = Math.floor(taxDue);
 
         // Max 50% Regulatory Safeguard override Check
-        const maxAllowedTaxYTD = payToDate * 0.50;
+        const maxAllowedTax = payToDate * 0.50;
         let isCapped = false;
-        if (finalTaxDue > maxAllowedTaxYTD) {
-            finalTaxDue = Math.floor(maxAllowedTaxYTD);
+        if (finalTaxDue > maxAllowedTax) {
+            finalTaxDue = Math.floor(maxAllowedTax);
             isCapped = true;
         }
 
-        // Display results safely
-        document.getElementById('resMonth').textContent = `Month ${taxMonth}`;
+        // Display results
+        document.getElementById('resBasis').textContent = isNonCumulative ? "Non-Cumulative (W1/M1)" : "Cumulative";
+        document.getElementById('resBasis').style.backgroundColor = isNonCumulative ? "#fee2e2" : "#e0f2fe";
+        document.getElementById('resBasis').style.color = isNonCumulative ? "#991b1b" : "#0369a1";
+
+        document.getElementById('resMonth').textContent = isNonCumulative ? `Month ${trueTaxMonth} (Processed as Month 1)` : `Month ${trueTaxMonth}`;
         document.getElementById('resTaxable').textContent = `£${hmrcRoundedTaxableIncome.toFixed(2)}`;
         document.getElementById('resTax').textContent = `£${finalTaxDue.toFixed(2)}`;
+        document.getElementById('lblTaxTotal').textContent = isNonCumulative ? "Tax Due This Period:" : "Tax Due to Date:";
         document.getElementById('capAlert').style.display = isCapped ? 'block' : 'none';
         document.getElementById('result').style.display = 'block';
     }
